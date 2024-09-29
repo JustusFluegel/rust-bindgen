@@ -830,19 +830,65 @@ impl CodeGenerator for Type {
         debug_assert!(item.is_enabled_for_codegen(ctx));
 
         match *self.kind() {
-            TypeKind::Void |
-            TypeKind::NullPtr |
-            TypeKind::Int(..) |
-            TypeKind::Float(..) |
-            TypeKind::Complex(..) |
-            TypeKind::Array(..) |
-            TypeKind::Vector(..) |
-            TypeKind::Pointer(..) |
-            TypeKind::Reference(..) |
-            TypeKind::Function(..) |
-            TypeKind::ResolvedTypeRef(..) |
-            TypeKind::Opaque |
-            TypeKind::TypeParam => {
+            TypeKind::Function(ref signature)
+                if ctx.options().dynamic_library_name.is_some() =>
+            {
+                let name = signature.name();
+
+                let args = utils::fnsig_arguments(ctx, &signature);
+                let ret = utils::fnsig_return_ty(ctx, &signature);
+
+                let args_identifiers =
+                    utils::fnsig_argument_identifiers(ctx, &signature);
+                let ret_ty = utils::fnsig_return_ty(ctx, &signature);
+                let abi = match signature.abi(ctx, Some(name)) {
+                    Err(err) => {
+                        if matches!(err, error::Error::UnsupportedAbi(_)) {
+                            unsupported_abi_diagnostic(
+                                name,
+                                signature.is_variadic(),
+                                item.location(),
+                                ctx,
+                                &err,
+                            );
+                        }
+
+                        return;
+                    }
+                    Ok(ClangAbi::Unknown(unknown_abi)) => {
+                        panic!(
+                            "Invalid or unknown abi {:?} for function {:?} ({:?})",
+                            unknown_abi, name, self
+                        );
+                    }
+                    Ok(abi) => abi,
+                };
+                result.dynamic_items().push_func(
+                    ctx.rust_ident(name),
+                    abi,
+                    signature.is_variadic(),
+                    ctx.options().dynamic_link_require_all,
+                    args,
+                    args_identifiers,
+                    ret,
+                    ret_ty,
+                    Vec::new(),
+                    ctx,
+                );
+            }
+            TypeKind::Void
+            | TypeKind::NullPtr
+            | TypeKind::Int(..)
+            | TypeKind::Float(..)
+            | TypeKind::Complex(..)
+            | TypeKind::Array(..)
+            | TypeKind::Vector(..)
+            | TypeKind::Pointer(..)
+            | TypeKind::Reference(..)
+            | TypeKind::Function(..)
+            | TypeKind::ResolvedTypeRef(..)
+            | TypeKind::Opaque
+            | TypeKind::TypeParam => {
                 // These items don't need code generation, they only need to be
                 // converted to rust types in fields, arguments, and such.
                 // NOTE(emilio): If you add to this list, make sure to also add
